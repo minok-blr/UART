@@ -18,6 +18,7 @@
  */
 
 #include <stdint.h>
+#include <string.h>
 #include "../Inc/printf.h"
 #include "../Inc/stm32f4xx.h"
 
@@ -25,10 +26,60 @@
   #warning "FPU is not initialized, but the project is compiling for an FPU. Please initialize the FPU before use."
 #endif
 
+void USART1_SendData(){
+	char *word = "TIPKA";
+	while(*word) sendChar(*word++);
+}
+
+void sendChar(uint8_t letter)
+{
+	USART1->DR = letter; // save data in data register
+	while(!(USART1->SR & (1<<6))); // wait for transmission to happen
+}
+
+void USART2_ReceiveData(){
+	uint8_t letter;
+	while(!(USART2->SR & (1<<5)));
+	letter = USART2->DR;
+}
+
 int main(void)
 {
+	// enable gpio b and c clocks, and usart 1 and 6 clocks
+	SET_BIT(RCC->AHB1ENR, RCC_AHB1ENR_GPIOBEN);
+	SET_BIT(RCC->AHB1ENR, RCC_AHB1ENR_GPIOCEN);
+	SET_BIT(RCC->APB2ENR, RCC_APB2ENR_USART1EN);
+	SET_BIT(RCC->APB2ENR, RCC_APB2ENR_USART6EN);
+
+	SET_BIT(GPIOB->MODER, GPIO_MODER_MODER6_1);
+	CLEAR_BIT(GPIOB->MODER, GPIO_MODER_MODER6_0);
+
+	SET_BIT(GPIOC->MODER, GPIO_MODER_MODER7_1);
+	CLEAR_BIT(GPIOC->MODER, GPIO_MODER_MODER7_0);
+
+	SET_BIT(GPIOB->AFR[0], 1<<27);
+	CLEAR_BIT(GPIOB->AFR[0], 1<<26);
+	CLEAR_BIT(GPIOB->AFR[0], 1<<25);
+	CLEAR_BIT(GPIOB->AFR[0], 1<<24);
+
+	CLEAR_BIT(GPIOC->AFR[0], 1<<31);
+	SET_BIT(GPIOC->AFR[0], 1<<30);
+	SET_BIT(GPIOC->AFR[0], 1<<29);
+	SET_BIT(GPIOC->AFR[0], 1<<28);
+
+	SET_BIT(USART1->CR1, USART_CR1_UE); // enable ue bit
+	SET_BIT(USART1->CR1, USART_CR1_M);  // set m bit for word len
+	//baud rate
+	SET_BIT(USART1->CR1, USART_CR1_TE); //
+
+	SET_BIT(USART6->CR1, USART_CR1_UE);
+	SET_BIT(USART6->CR1, USART_CR1_M); // 1 or 0?
+	//baud rate
+	SET_BIT(USART6->CR1, USART_CR1_RE);
+
     /* Loop forever */
 	for (;;) {
+
 
 		//printf("hello\n");
 	}

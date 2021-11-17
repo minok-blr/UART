@@ -1,3 +1,5 @@
 printf.h:50:24:ITM_SendChar	16	static,ignoring_inline_asm
 printf.h:65:5:_write	32	static
-main.c:28:5:main	8	static
+main.c:29:6:sendChar	16	static
+main.c:35:6:sendString	16	static
+main.c:40:5:main	16	static
