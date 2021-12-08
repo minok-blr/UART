@@ -26,13 +26,16 @@
 #define GREEN_LED_PIN (1 << 12)
 #define USER_BUTTON_PIN (1 << 0)
 
-volatile uint8_t buffer[5] = {'\0'};
+volatile uint8_t buffer[6] = {'\0'};
+volatile uint8_t bufferUART1[3] = {'\0'};
+volatile uint8_t iter = 0;
+volatile uint8_t iterShort = 0;
 
 #if !defined(__SOFT_FP__) && defined(__ARM_FP)
   #warning "FPU is not initialized, but the project is compiling for an FPU. Please initialize the FPU before use."
 #endif
 
-void CONFIG()
+void USART_CONFIG()
 {
 	// enable gpio b and c clocks, and usart 1 and 6 clocks
 	SET_BIT(RCC->AHB1ENR, RCC_AHB1ENR_GPIOAEN); // enable A clock
@@ -42,7 +45,7 @@ void CONFIG()
 	SET_BIT(RCC->APB2ENR, RCC_APB2ENR_USART1EN);// USART1
 	SET_BIT(RCC->APB2ENR, RCC_APB2ENR_USART6EN);// USART6
 
-	// set PB6 and PC7 pins to alternate function mode
+	// set PB6 TX and PC7 RX pins to alternate function mode
 	SET_BIT(GPIOB->MODER, GPIO_MODER_MODER6_1);
 	CLEAR_BIT(GPIOB->MODER, GPIO_MODER_MODER6_0);
 
@@ -61,127 +64,210 @@ void CONFIG()
 	CLEAR_BIT(GPIOC->AFR[0], 1<<29);
 	CLEAR_BIT(GPIOC->AFR[0], 1<<28);
 
-	// UART CONFIG PB6
+	// !================== TASK 4 ==================!
+
+	// set PB7 (RX) pins to AFM
+	SET_BIT(GPIOB->MODER, GPIO_MODER_MODER7_1);
+	CLEAR_BIT(GPIOB->MODER, GPIO_MODER_MODER7_0);
+
+	// set PC6 (TX) pins to AFM
+	SET_BIT(GPIOC->MODER, GPIO_MODER_MODER6_1);
+	CLEAR_BIT(GPIOC->MODER, GPIO_MODER_MODER6_0);
+
+	// PC6, set AFRL6 to AF7(USART6) TX
+	CLEAR_BIT(GPIOC->AFR[0], 1<<27);
+	SET_BIT(GPIOC->AFR[0], 1<<26);
+	SET_BIT(GPIOC->AFR[0], 1<<25);
+	SET_BIT(GPIOC->AFR[0], 1<<24);
+
+	// PB7, set AFRL7 to AF8(USART1) RX
+	SET_BIT(GPIOB->AFR[0], 1<<31);
+	CLEAR_BIT(GPIOB->AFR[0], 1<<30);
+	CLEAR_BIT(GPIOB->AFR[0], 1<<29);
+	CLEAR_BIT(GPIOB->AFR[0], 1<<28);
+
+	// enable interrupts
+	SET_BIT(USART1->CR1, USART_CR1_RXNEIE);
+	SET_BIT(USART6->CR1, USART_CR1_RXNEIE);
+	NVIC_EnableIRQ(37);
+	NVIC_EnableIRQ(71);
+
+	// !================== TASK 4 ==================!
+
+	// UART CONFIG PB6 TX and PB7 RX
 	SET_BIT(USART1->CR1, USART_CR1_UE); 	// 1. enable UE bit
 	CLEAR_BIT(USART1->CR1, USART_CR1_M);  	// 2. set M bit for word len, in this case 8 bits
 	CLEAR_BIT(USART1->CR1, USART_CR1_OVER8);// 3. oversampling by 16
 	USART1->BRR = (11<<0) | (8<<4);			// 4. baud rate 8.6875, DIV_MANTISSA = 0x8, DIV_FRAC = 0xB 0b1011
 	SET_BIT(USART1->CR1, USART_CR1_TE); 	// 5. set TE in USART_CR1 to send idle frame as 1st transmission
+	SET_BIT(USART1->CR1, USART_CR1_RE); 	// 5. set RE in USART_CR1
 
 	// 6. write to USART_DR(clears the TXE bit) and repeat for the whole buffer
 	// 7. wait until TC == 1, when USART disabled/enters halt mode
 
-	// UART CONFIG PC7
+	// UART CONFIG PC7 RX and PC6 TX
 	SET_BIT(USART6->CR1, USART_CR1_UE); 	// 1. enable UE bit
 	CLEAR_BIT(USART6->CR1, USART_CR1_M);  	// 2. set M bit for word len, in this case 8 bits
 	CLEAR_BIT(USART6->CR1, USART_CR1_OVER8);// 3. oversampling by 16
 	USART6->BRR = (11<<0) | (8<<4);			// 4. baud rate 8.6875, DIV_MANTISSA = 0x8, DIV_FRAC = 0xB 0b1011
-	SET_BIT(USART6->CR1, USART_CR1_RE); 	// 5. set TE in USART_CR1 to send idle frame as 1st transmission
+	SET_BIT(USART6->CR1, USART_CR1_RE); 	// 5. set RE in USART_CR1
+	SET_BIT(USART6->CR1, USART_CR1_TE); 	// 5. set TE in USART_CR1 to send idle frame as 1st transmission
+
+}
+
+void USART1_IRQHandler(void)
+{
+	bufferUART1[iterShort] = USART1->DR;
+}
+
+void USART6_IRQHandler(void)
+{
+	buffer[iter] = USART6->DR;
 }
 
 void sendChar(uint8_t letter, uint8_t iter)
 {
 	WRITE_REG(USART1->DR, letter);
-	//USART1->DR = letter; // save data in data register
 	while(!(USART1->SR & (1<<6))); // wait for transmission to happen
-	for (int i = 0;i < 10000; ++i) {
+}
 
+void sendChar6(uint8_t letter, uint8_t iter)
+{
+	WRITE_REG(USART6->DR, letter);
+	while(!(USART6->SR & (1<<6))); // wait for transmission to happen
+}
+
+void USART6_SendData(uint8_t choice){
+	char *word = (char*)'0';
+	if(choice == 1) word = "BUTTON";
+	else word = "WRONG";
+
+	if(choice == 10)
+	{
+		word="OK!";
 	}
-	buffer[iter] = USART6->DR;
-	printf("%c\n", USART6->DR);
+	if(choice == 11)
+	{
+		word = "NOT";
+	}
+	while(*word) {
+		sendChar6(*word, iterShort);
+		*(word++);
+		iterShort++;
+	}
+
 }
 
 void USART1_SendData(uint8_t choice){
-	uint8_t iter = 0;
+	//uint8_t iter = 0;
 	char *word = (char*)'0';
-	if(choice == 1) word = "TIPKA";
+	if(choice == 1) word = "BUTTON";
 	else word = "WRONG";
-	while(*word) sendChar(*word++, iter++);
+
+	if(choice == 10)
+	{
+		word="OK!";
+	}
+	if(choice == 11)
+	{
+		word = "NOT";
+	}
+	while(*word) {
+		sendChar(*word, iter);
+		*(word++);
+		iter++;
+	}
 
 }
 
-void USART6_ReceiveData(){
-	uint8_t letter;
-	while(!(USART6->SR & (1<<5)));
-	//letter = USART6->DR;
-	letter = READ_REG(USART6->DR);
-	printf("%c\n", letter);
-}
+//void USART6_ReceiveData(){
+//	uint8_t letter;
+//	while(!(USART6->SR & (1<<5)));
+//	letter = READ_REG(USART6->DR);
+//	printf("%c\n", letter);
+//}
 
 int main(void)
 {
-	CONFIG();
+	USART_CONFIG();
 
 	// set PA0 to input
 	CLEAR_BIT(GPIOA->MODER, GPIO_MODER_MODER0_1);
 	CLEAR_BIT(GPIOA->MODER, GPIO_MODER_MODER0_0);
 
-	// set pd14 to output RED_LED
+	// RED_LED PD14
 	SET_BIT(GPIOD->MODER, GPIO_MODER_MODER14_0);
 	CLEAR_BIT(GPIOD->MODER, GPIO_MODER_MODER14_1);
 
-	// GREEN LED PD12
+	// GREEN_LED PD12
 	SET_BIT(GPIOD->MODER, GPIO_MODER_MODER12_0);
 	CLEAR_BIT(GPIOD->MODER, GPIO_MODER_MODER12_1);
-
-//	uint32_t * aModer = (uint32_t*)GPIOA_MODER;
-	// &= ~(3 << 0)
-//	*aModer &= ~(1<<0); // bit 0 to 0
-//	*aModer &= ~(1<<1); // bit 1 to 0
-
-	//uint32_t *aIdr = (uint32_t*)GPIOA->IDR;;
-	//uint32_t *dOdr = (uint32_t*)GPIOD->ODR;
 
 	uint8_t confidence = 0;
 	uint8_t threshold = 15;
 	uint8_t buttonSwitch = 0;
 	uint8_t prevButtonState = 0;
 	int counter = 0;
-	//uint8_t equal = 0;
-
-
 
     /* Loop forever */
 	for (;;) {
 		int32_t buttonState = GPIOA->IDR & USER_BUTTON_PIN;
 
-		if (confidence > threshold && buttonState == 0) {
-			buttonSwitch = 1;
-		}
-
-		if (buttonState != 0 && prevButtonState != 0) {
-			confidence++;
-		}
-		else {
-			confidence = 0;
-		}
+		if (confidence > threshold && buttonState == 0) buttonSwitch = 1;
+		if (buttonState != 0 && prevButtonState != 0) confidence++;
+		else confidence = 0;
 
 		if (buttonSwitch == 1)
 		{
-			// do something
 			counter++;
 			USART1_SendData(counter%2);
 
 			//check what is received
 			uint8_t strength = 0;
-			char* word = "TIPKA";
-			for (int i = 0; i < 5; i++) {
-				if(buffer[i] == word[i])
-				{
-					strength++;
-				}
+			char* word = "BUTTON";
+			for (int i = 0; i < 6; i++) {
+				if(buffer[i] == word[i]) strength++;
 			}
-			if(strength == 5)
+			if(strength == 6)
 			{
-				GPIOD->ODR |= GREEN_LED_PIN;
-				GPIOD->ODR &= ~RED_LED_PIN;
+				// if "TIPKA" is received
+				// turn on green light, wait a bit and turn it off
+				char *wordOK = "OK!";
+				USART6_SendData(10);
+
 				strength = 0;
+				for (int i = 0; i < 3; i++) {
+					if(bufferUART1[i] == wordOK[i]) strength++;
+				}
+				if (strength == 3) {
+					GPIOD->ODR |= GREEN_LED_PIN;
+					for (int var = 0; var < 1000000; ++var) asm("nop");
+					GPIOD->ODR &= ~GREEN_LED_PIN;
+				}
+
+
+				strength = 0;
+				iter = 0;
+				iterShort = 0;
 			}
 			else
 			{
-				GPIOD->ODR |= RED_LED_PIN;
-				GPIOD->ODR &= ~GREEN_LED_PIN;
 				strength = 0;
+				char *wordNOT = "NOT";
+				USART6_SendData(11);
+
+				for (int i = 0; i < 3; i++) {
+					if(bufferUART1[i] == wordNOT[i]) strength++;
+				}
+				if (strength == 3) {
+					GPIOD->ODR |= RED_LED_PIN;
+					for (int var = 0; var < 1000000; ++var) asm("nop");
+					GPIOD->ODR &= ~RED_LED_PIN;
+				}
+
+				strength = 0;
+				iter = 0;
+				iterShort = 0;
 			}
 			confidence = 0;
 			buttonSwitch = 0;
@@ -190,6 +276,5 @@ int main(void)
 
 		prevButtonState = buttonState;
 		if(counter == 99) counter = 0;
-		//printf("hello\n");
 	}
 }
